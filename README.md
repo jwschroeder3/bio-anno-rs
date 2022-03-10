@@ -8,5 +8,6 @@ without warning.
 
 ## TODO:
 
+* Add sorting by chromosome name and start position
 * Handle more data types.
 * Use traits to simplify code for common operations, such as filtering records in a narrowpeak, bedgraph, gff, etc., file.
