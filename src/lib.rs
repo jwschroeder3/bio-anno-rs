@@ -9,6 +9,9 @@ use csv;
 #[cfg(test)]
 mod tests {
 
+    /////////////////////////////////////////////////////////
+    // update to work anywhere, setting src depending on where we are?
+    /////////////////////////////////////////////////////////
     const TESTDIR: &str = "/home/jeremy/src/bio-anno-rs/test_files";
     use super::*;
 
