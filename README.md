@@ -13,3 +13,16 @@ without warning.
 * Add sorting by chromosome name and start position
 * Handle more data types.
 * Use traits to simplify code for common operations, such as filtering, sorting, and shuffling records in a narrowpeak, bedgraph, gff, etc., file.
+
+## use in a rust binary
+
+To use this crate, I *think* you can add the following to your
+`Cargo.toml` file:
+
+```toml
+[dependencies]
+bio_anno = { git = "https://github.com/jwschroeder3/bio-anno-rs", branch = "main" }
+```
+
+And then include `use bio_anno;` in your source code.
+
