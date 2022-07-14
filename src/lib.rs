@@ -78,6 +78,16 @@ mod tests {
         );
         assert_eq!(bgd[5000], answer2);
     }
+
+    #[test]
+    fn test_fetch_scores() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("test.bedgraph"),
+        ).unwrap();
+        let scores = bgd.fetch_scores().unwrap();
+        let answer = vec![0.06669717398000229; 5];
+        assert_eq!(answer, scores[0..5]);
+    }
 }
 
 /// struct to define a single line of a bedgraph file
@@ -112,7 +122,7 @@ pub struct BEDGraphData {
 
 impl BEDGraphData {
     /// Read a bedgraph file
-    fn from_file(fname: &path::PathBuf) -> Result<BEDGraphData, Box<dyn Error>> {
+    pub fn from_file(fname: &path::PathBuf) -> Result<BEDGraphData, Box<dyn Error>> {
 
         let file = File::open(fname).unwrap_or_else(|err| {
             eprintln!("Problem reading bedgraph file {:?}: {}", fname, err);
@@ -164,6 +174,14 @@ impl BEDGraphData {
             }).collect();
         
         Ok(BEDGraphData{data: records})
+    }
+
+    pub fn fetch_scores(&self) -> Result<Vec<f64>, Box<dyn Error>> {
+
+        let scores: Vec::<f64> = self.iter()
+            .map(|record| record.score)
+            .collect();
+        Ok(scores)
     }
 }
 
