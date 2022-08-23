@@ -1,3 +1,4 @@
+use std::fmt;
 use std::io::BufReader;
 use std::fs::File;
 use std::error::Error;
@@ -231,6 +232,13 @@ impl BEDGraphRecord {
     }
 }
 
+/// Implement `Display` for `BEDGraphRecord`.
+impl fmt::Display for BEDGraphRecord {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}\t{}\t{}\t{}", self.seqname, self.start, self.end, self.score)
+    }
+}
+
 /// holds a bedgraph file
 pub struct BEDGraphData {
     data: Vec<BEDGraphRecord>,
@@ -261,6 +269,14 @@ impl BEDGraphData {
             records.push(record);
         }
         Ok(BEDGraphData{ data: records })
+    }
+
+    /// Writes the bedgraph file to stdout
+    pub fn print(&self) -> Result<(), Box<dyn Error>> {
+        for record in &self.data {
+            println!("{}", record);
+        }
+        Ok(())
     }
 
     /// Returns number of records in self
