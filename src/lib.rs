@@ -4,6 +4,7 @@ use std::error::Error;
 use std::path;
 use serde::Deserialize;
 use std::process;
+use itertools::Itertools;
 use csv;
 
 #[cfg(test)]
@@ -14,6 +15,8 @@ mod tests {
     /////////////////////////////////////////////////////////
     const TESTDIR: &str = "/home/jeremy/src/bio-anno-rs/test_files";
     use super::*;
+    use approx::assert_abs_diff_eq;
+    use ndarray::Array;
 
     #[test]
     fn test_bg_filter() {
@@ -55,6 +58,119 @@ mod tests {
             0.5703630173280463,
         );
         assert_eq!(filter_bgd[filter_bgd.len()-1], answer3);
+    }
+
+    #[test]
+    fn test_get_contigs() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("test.bedgraph"),
+        ).unwrap();
+        let answer = vec!["CP064350.1", "CP064351.1", "pBRP02"];
+        let contigs = bgd.get_contigs();
+        itertools::assert_equal(contigs, answer);
+    }
+
+    #[test]
+    fn test_ctg_lengths() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("test.bedgraph"),
+        ).unwrap();
+        let contigs = bgd.get_contigs();
+        let answer: Vec<usize> = vec![55025, 1070350, 9945];
+        let mut results: Vec<usize> = vec![];
+        for contig in contigs {
+            results.push(bgd.get_contig_length(&contig).unwrap());
+        }
+        itertools::assert_equal(results, answer);
+    }
+
+    #[test]
+    fn test_roll_mean() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("small.bedgraph"),
+        ).unwrap();
+        let winsize: usize = 3;
+        let answer = vec![
+            0.06669717398000229,
+            0.06669717398000229,
+            0.06669717398000229,
+            -0.646127,
+            -0.646127,
+            -0.646127,
+            -0.5847706,
+            -0.5847706,
+            -0.5847706,
+        ];
+        let result = bgd.roll_mean(
+            winsize,
+            true,
+        ).unwrap();
+        let res_scores = result.fetch_scores().unwrap();
+        for (i,res) in res_scores.iter().enumerate() {
+            assert_abs_diff_eq!(*res, answer[i], epsilon=1e-5);
+        }
+
+        let result = bgd.roll_mean(
+            winsize,
+            false,
+        ).unwrap();
+        let res_scores = result.fetch_scores().unwrap();
+        let answer = vec![
+            0.06669717398000229,
+            0.06669717398000229,
+            0.06669717398000229,
+            -0.6926474,
+            -0.646127,
+            -0.5996065,
+            -0.9260348,
+            -0.5847706,
+            -0.2435064,
+        ];
+        for (i,res) in res_scores.iter().enumerate() {
+            assert_abs_diff_eq!(*res, answer[i], epsilon=1e-5);
+        }
+    }
+
+    #[test]
+    fn test_padding() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("small.bedgraph"),
+        ).unwrap();
+        let padded = bgd.get_padded_scores(2, true).unwrap();
+        let answer = vec![
+            -0.386565212080191,
+            -0.1719770035449314,
+            0.06669717398000229,
+            0.06669717398000229,
+            0.06669717398000229,
+            -0.622378649894243,
+            -0.8331850071880074,
+            -0.48281724264735265,
+            -1.1957696376198523,
+            -0.386565212080191,
+            -0.1719770035449314,
+            0.06669717398000229,
+            0.06669717398000229,
+        ];
+        itertools::assert_equal(padded, answer);
+
+        let padded = bgd.get_padded_scores(2, false).unwrap();
+        let answer = vec![
+            0.06669717398000229,
+            0.06669717398000229,
+            0.06669717398000229,
+            0.06669717398000229,
+            0.06669717398000229,
+            -0.622378649894243,
+            -0.8331850071880074,
+            -0.48281724264735265,
+            -1.1957696376198523,
+            -0.386565212080191,
+            -0.1719770035449314,
+            -0.1719770035449314,
+            -0.1719770035449314,
+        ];
+        itertools::assert_equal(padded, answer);
     }
 
     #[test]
@@ -176,12 +292,116 @@ impl BEDGraphData {
         Ok(BEDGraphData{data: records})
     }
 
+    /// returns a Result, which if successful, contains the score
+    /// column of the bedgraph file as a vector of f64 values
     pub fn fetch_scores(&self) -> Result<Vec<f64>, Box<dyn Error>> {
-
         let scores: Vec::<f64> = self.iter()
             .map(|record| record.score)
             .collect();
         Ok(scores)
+    }
+
+    /// returns a vec of contig names
+    fn get_contigs(&self) -> Vec<String> {
+        let contigs = self.iter()
+            .map(|x| x.seqname)
+            .unique()
+            .collect();
+        contigs
+    }
+
+    fn get_max_end(&self) -> usize {
+        self.iter().map(|x| x.end).max().unwrap()
+    }
+
+    /// returns the greatest end position in self
+    fn get_contig_length(&self, seqname: &str) -> Result<usize, Box<dyn Error>> {
+        let ctg_bg = self.filter(
+            seqname,
+            &0,
+            &usize::MAX,
+        )?;
+        Ok(ctg_bg.get_max_end())
+    }
+
+    fn get_padded_scores(
+            &self,
+            pad_size: usize,
+            circular: bool,
+    ) -> Result<Vec<f64>, Box<dyn Error>> {
+        let scores = self.fetch_scores()?;
+        let n_scores = scores.len();
+        let mut padded: Vec<f64> = Vec::with_capacity(n_scores + pad_size * 2);
+        if circular {
+            padded.extend_from_slice(&scores[n_scores-pad_size..]);
+            padded.extend_from_slice(&scores[..]);
+            padded.extend_from_slice(&scores[..pad_size]);
+        } else {
+            for _ in 0..pad_size {
+                padded.push(scores[0]);
+            }
+            padded.extend_from_slice(&scores[..]);
+            for _ in 0..pad_size {
+                padded.push(scores[n_scores-1]);
+            }
+        }
+        Ok(padded)
+    }
+
+    /// calculates a rolling mean for each contig in the bedgraph file
+    pub fn roll_mean(
+            &self,
+            window_size: usize,
+            circular: bool,
+    ) -> Result<BEDGraphData, Box<dyn Error>> {
+        if window_size % 2 == 0 {
+            eprintln!("Window size should be an odd number for rolling mean, but you entered {}. Exiting now.", window_size);
+            process::exit(1);
+        }
+        let win_size_f = window_size as f64;
+        let contigs = self.get_contigs();
+        let mut records: Vec::<BEDGraphRecord> = Vec::with_capacity(self.len());
+        for contig in contigs {
+            let contig_bg = self.filter(
+                &contig,
+                &0,
+                &usize::MAX,
+            )?;
+            let padded_scores = contig_bg.get_padded_scores(
+                (window_size-1)/2,
+                circular,
+            )?;
+
+            let mut mean_prev_opt: Option<(f64, f64)> = None;
+            let mut results: Vec<f64> = Vec::with_capacity(contig_bg.len());
+
+            for window in padded_scores.windows(window_size) {
+                let mean = match mean_prev_opt {
+                    None => {
+                        window.iter().sum::<f64>() / win_size_f
+                    },
+                    Some((prev_mean, prev)) => {
+                        let next = window.last().unwrap();
+                        let mean = prev_mean + (*next - prev) / win_size_f;
+                        mean
+                    }
+                };
+                let prev = window.first().unwrap();
+                results.push(mean);
+                mean_prev_opt = Some((mean, *prev))
+            }
+
+            for (i,result) in results.iter().enumerate() {
+                let record = BEDGraphRecord::new(
+                    contig.to_string(),
+                    contig_bg.data[i].start,
+                    contig_bg.data[i].end,
+                    *result,
+                );
+                records.push( record );
+            }
+        }
+        Ok(BEDGraphData{data: records})
     }
 }
 
