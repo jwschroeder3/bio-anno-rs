@@ -62,8 +62,8 @@ mod tests {
     }
 
     #[test]
-    fn test_cpm() {
-        let bgd = BEDGraphData::from_file(
+    fn test_get_cpm() {
+        let mut bgd = BEDGraphData::from_file(
             &path::Path::new(TESTDIR).join("cov.bedgraph"),
         ).unwrap();
         let cpm = bgd.get_cpm().unwrap();
@@ -76,6 +76,23 @@ mod tests {
             assert_abs_diff_eq!(*res, answer[i], epsilon=1e-2);
         }
     }
+
+    #[test]
+    fn test_to_cpm() {
+        let mut bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("cov.bedgraph"),
+        ).unwrap();
+        let answer = vec![
+            17133.54, 17133.54, 17133.54,
+            159880.08, 214033.18, 124028.77,
+            307175.93, 99303.01, 44178.41,
+        ];
+        bgd.to_cpm();
+        for (i,res) in answer.iter().enumerate() {
+            assert_abs_diff_eq!(*res, bgd.data[i].score, epsilon=1e-2);
+        }
+    }
+
 
     #[test]
     fn test_get_contigs() {
@@ -254,6 +271,10 @@ impl BEDGraphRecord {
             score,
         }
     }
+
+    fn set_score(&mut self, new_score: f64) {
+        self.score = new_score;
+    }
 }
 
 /// Implement `Display` for `BEDGraphRecord`.
@@ -332,13 +353,21 @@ impl BEDGraphData {
         Ok(BEDGraphData{data: records})
     }
 
-    pub fn get_cpm(&self) -> Result<Vec<f64>, Box<dyn Error>> {
+    fn get_cpm(&self) -> Result<Vec<f64>, Box<dyn Error>> {
         let scores = self.fetch_scores()?;
         let sum: f64 = scores.iter().sum();
         let cpm: Vec<f64> = scores.iter()
             .map(|a| a / sum * 1_000_000.0)
             .collect();
         Ok(cpm)
+    }
+
+    pub fn to_cpm(&mut self) -> Result<(), Box<dyn Error>> {
+        let cpm = self.get_cpm()?;
+        for (i,new_score) in cpm.iter().enumerate() {
+            self.data[i].set_score(*new_score);
+        }
+        Ok(())
     }
 
     /// returns a Result, which if successful, contains the score
