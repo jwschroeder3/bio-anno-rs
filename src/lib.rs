@@ -1,3 +1,5 @@
+use std::io::stdout;
+use std::io::Write;
 use std::fmt;
 use std::io::BufReader;
 use std::fs::File;
@@ -318,8 +320,9 @@ impl BEDGraphData {
 
     /// Writes the bedgraph file to stdout
     pub fn print(&self) -> Result<(), Box<dyn Error>> {
+        let mut stdout = stdout();
         for record in &self.data {
-            println!("{}", record);
+            write!(stdout, "{}", record)?;
         }
         Ok(())
     }
