@@ -282,7 +282,7 @@ impl BEDGraphRecord {
 /// Implement `Display` for `BEDGraphRecord`.
 impl fmt::Display for BEDGraphRecord {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}\t{}\t{}\t{}", self.seqname, self.start, self.end, self.score)
+        write!(f, "{}\t{}\t{}\t{}\n", self.seqname, self.start, self.end, self.score)
     }
 }
 
