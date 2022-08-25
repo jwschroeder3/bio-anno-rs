@@ -72,6 +72,14 @@ mod tests {
     }
 
     #[test]
+    fn test_res() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("test.bedgraph"),
+        ).unwrap();
+        assert_eq!(5, bgd.get_resolution())
+    }
+
+    #[test]
     fn test_ctg_lengths() {
         let bgd = BEDGraphData::from_file(
             &path::Path::new(TESTDIR).join("test.bedgraph"),
@@ -362,6 +370,10 @@ impl BEDGraphData {
             }
         }
         Ok(padded)
+    }
+
+    pub fn get_resolution(&self) -> usize {
+        self.data[1].start - self.data[0].start
     }
 
     /// calculates a rolling mean for each contig in the bedgraph file
