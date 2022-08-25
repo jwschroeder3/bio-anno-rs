@@ -62,6 +62,22 @@ mod tests {
     }
 
     #[test]
+    fn test_cpm() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("cov.bedgraph"),
+        ).unwrap();
+        let cpm = bgd.get_cpm().unwrap();
+        let answer = vec![
+            17133.54, 17133.54, 17133.54,
+            159880.08, 214033.18, 124028.77,
+            307175.93, 99303.01, 44178.41,
+        ];
+        for (i,res) in cpm.iter().enumerate() {
+            assert_abs_diff_eq!(*res, answer[i], epsilon=1e-2);
+        }
+    }
+
+    #[test]
     fn test_get_contigs() {
         let bgd = BEDGraphData::from_file(
             &path::Path::new(TESTDIR).join("test.bedgraph"),
@@ -314,6 +330,15 @@ impl BEDGraphData {
             }).collect();
         
         Ok(BEDGraphData{data: records})
+    }
+
+    pub fn get_cpm(&self) -> Result<Vec<f64>, Box<dyn Error>> {
+        let scores = self.fetch_scores()?;
+        let sum: f64 = scores.iter().sum();
+        let cpm: Vec<f64> = scores.iter()
+            .map(|a| a / sum * 1_000_000.0)
+            .collect();
+        Ok(cpm)
     }
 
     /// returns a Result, which if successful, contains the score
