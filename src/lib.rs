@@ -248,7 +248,107 @@ mod tests {
         let answer = vec![0.06669717398000229; 5];
         assert_eq!(answer, scores[0..5]);
     }
+
+    #[test]
+    fn test_median() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("small.bedgraph"),
+        ).unwrap();
+        let med = bgd.median().unwrap();
+        let answer = -0.386565212080191;
+        assert_eq!(med, answer);
+
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("small2.bedgraph"),
+        ).unwrap();
+        let med = bgd.median().unwrap();
+        let answer = (-0.386565212080191 + -0.1719770035449314) / 2.0;
+        assert_eq!(med, answer);
+
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("test.bedgraph"),
+        ).unwrap();
+        let med = bgd.median().unwrap();
+        let answer = 0.0623446015925157;
+        assert_eq!(med, answer);
+    }
+
+    #[test]
+    fn test_mean() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("test.bedgraph"),
+        ).unwrap();
+        let mean = bgd.mean().unwrap();
+        let answer = 0.4037938099229696;
+        assert_eq!(mean, answer);
+    }
+
+    #[test]
+    fn test_mad() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("small.bedgraph"),
+        ).unwrap();
+        let mad = bgd.mad().unwrap();
+        let answer = 0.4451182037397217;
+        assert_eq!(mad, answer);
+    }
+
+    #[test]
+    fn test_robust_z() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("small.bedgraph"),
+        ).unwrap();
+        let rz = bgd.robust_z().unwrap();
+        let answer: Vec<f64> = vec![
+            0.686841,
+            0.686841,
+            0.686841,
+            -0.357335,
+            -0.676776,
+            -0.145853,
+            -1.22621,
+            -1.51412e-15,
+            0.325172,
+        ];
+        let zscores = rz.fetch_scores().unwrap();
+        for (i,res) in zscores.iter().enumerate() {
+            assert_abs_diff_eq!(*res, answer[i], epsilon=1e-5);
+        }
+    }
 }
+
+fn median(vec: &mut Vec<f64>) -> Result<f64, Box<dyn Error>> {
+    vec.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let length = vec.len();
+    let mid = length / 2;
+    if length % 2 == 1 {
+        Ok(vec[mid])
+    } else {
+        let median = (vec[mid-1] + vec[mid]) / 2.0;
+        Ok(median)
+    }
+}
+
+fn mean(vec: &Vec<f64>) -> Result<f64, Box<dyn Error>> {
+    let sum: f64 = vec.iter().sum();
+    let count = vec.len() as f64;
+    Ok(sum / count)
+}
+
+fn mad(vec: &mut Vec<f64>) -> Result<f64, Box<dyn Error>> {
+    let mean_score = mean(vec)?;
+    let mut abs_devs: Vec<f64> = vec.iter()
+        .map(|a| (a-mean_score).abs())
+        .collect();
+    abs_devs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mad = median(&mut abs_devs)?;
+    Ok(mad)
+}
+
+fn robust_z(x: f64, median: f64, mad: f64) -> f64 {
+    0.6745 * (x - median) / mad
+}
+
 
 /// struct to define a single line of a bedgraph file
 #[derive(Debug, Deserialize, PartialEq)]
@@ -428,9 +528,48 @@ impl BEDGraphData {
         }
         Ok(padded)
     }
+    
+    fn median(&self) -> Result<f64, Box<dyn Error>> {
+        let mut scores = self.fetch_scores()?;
+        let med = median(&mut scores)?;
+        Ok(med)
+    }
+
+    fn mean(&self) -> Result<f64, Box<dyn Error>> {
+        let scores = self.fetch_scores()?;
+        let mean_score = mean(&scores)?;
+        Ok(mean_score)
+    }
+
+    fn mad(&self) -> Result<f64, Box<dyn Error>> {
+        let mut scores = self.fetch_scores()?;
+        let score_mad = mad(&mut scores)?;
+        Ok(score_mad)
+    }
 
     pub fn get_resolution(&self) -> usize {
         self.data[1].start - self.data[0].start
+    }
+
+    /// calculates robust z-score across entire genome for each position
+    pub fn robust_z(
+            &self,
+    ) -> Result<BEDGraphData, Box<dyn Error>> {
+
+        let score_mad = self.mad()?;
+        let score_median = self.median()?;
+        let scores = self.fetch_scores()?;
+        let records: Vec::<BEDGraphRecord> = self.iter()
+            .map(|x| {
+                BEDGraphRecord {
+                    seqname: x.seqname,
+                    start: x.start,
+                    end: x.end,
+                    score: robust_z(x.score, score_median, score_mad),
+                }
+            }).collect();
+        
+        Ok(BEDGraphData{data: records})
     }
 
     /// calculates a rolling mean for each contig in the bedgraph file
