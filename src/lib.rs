@@ -1,4 +1,5 @@
 use std::io::stdout;
+use std::io::stdin;
 use std::io::Write;
 use std::fmt;
 use std::io::BufReader;
@@ -392,6 +393,24 @@ pub struct BEDGraphData {
 }
 
 impl BEDGraphData {
+    /// Parse bedgraph records from stdin
+    pub fn from_stdin() -> Result<BEDGraphData, Box<dyn Error>> {
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(b'\t')
+            .has_headers(false)
+            .from_reader(stdin());
+        let mut records: Vec<BEDGraphRecord> = Vec::new();
+
+        for result in rdr.deserialize() {
+            let record = result.unwrap_or_else(|err| {
+                eprintln!("Problem with your bedgraph records. Is the stdin a properly-formed bedgraph file?: {}", err);
+                process::exit(1);
+            });
+            records.push(record);
+        }
+        Ok(BEDGraphData{ data: records })
+    }
+
     /// Read a bedgraph file
     pub fn from_file(fname: &path::PathBuf) -> Result<BEDGraphData, Box<dyn Error>> {
 
