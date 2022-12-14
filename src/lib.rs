@@ -20,7 +20,6 @@ mod tests {
     const TESTDIR: &str = "/home/jeremy/src/bio-anno-rs/test_files";
     use super::*;
     use approx::assert_abs_diff_eq;
-    use ndarray::Array;
 
     #[test]
     fn test_bg_filter() {
@@ -66,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_get_cpm() {
-        let mut bgd = BEDGraphData::from_file(
+        let bgd = BEDGraphData::from_file(
             &path::Path::new(TESTDIR).join("cov.bedgraph"),
         ).unwrap();
         let cpm = bgd.get_cpm().unwrap();
@@ -90,7 +89,7 @@ mod tests {
             159880.08, 214033.18, 124028.77,
             307175.93, 99303.01, 44178.41,
         ];
-        bgd.to_cpm();
+        bgd.to_cpm().unwrap();
         for (i,res) in answer.iter().enumerate() {
             assert_abs_diff_eq!(*res, bgd.data[i].score, epsilon=1e-2);
         }
@@ -130,6 +129,61 @@ mod tests {
     }
 
     #[test]
+    fn test_roll_median() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("med_test.bedgraph"),
+        ).unwrap();
+        let winsize: usize = 3;
+        let answer = vec![
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            -0.6,
+            -0.7,
+            -0.6,
+            -0.7,
+            -0.3,
+            -0.3,
+            -0.1,
+            -0.1,
+        ];
+        let result = bgd.roll_fn(
+            winsize,
+            true,
+            RollFn::Median,
+        ).unwrap();
+        let res_scores = result.fetch_scores().unwrap();
+        for (i,res) in res_scores.iter().enumerate() {
+            assert_abs_diff_eq!(*res, answer[i], epsilon=1e-5);
+        }
+
+        let result = bgd.roll_fn(
+            winsize,
+            false,
+            RollFn::Median,
+        ).unwrap();
+        let res_scores = result.fetch_scores().unwrap();
+        let answer = vec![
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            -0.7,
+            -0.7,
+            -0.6,
+            -0.4,
+            -1.1,
+            -0.3,
+            -0.1,
+            -0.1,
+        ];
+        for (i,res) in res_scores.iter().enumerate() {
+            assert_abs_diff_eq!(*res, answer[i], epsilon=1e-5);
+        }
+    }
+
+    #[test]
     fn test_roll_mean() {
         let bgd = BEDGraphData::from_file(
             &path::Path::new(TESTDIR).join("small.bedgraph"),
@@ -146,18 +200,20 @@ mod tests {
             -0.5847706,
             -0.5847706,
         ];
-        let result = bgd.roll_mean(
+        let result = bgd.roll_fn(
             winsize,
             true,
+            RollFn::Mean,
         ).unwrap();
         let res_scores = result.fetch_scores().unwrap();
         for (i,res) in res_scores.iter().enumerate() {
             assert_abs_diff_eq!(*res, answer[i], epsilon=1e-5);
         }
 
-        let result = bgd.roll_mean(
+        let result = bgd.roll_fn(
             winsize,
             false,
+            RollFn::Mean,
         ).unwrap();
         let res_scores = result.fetch_scores().unwrap();
         let answer = vec![
@@ -316,6 +372,11 @@ mod tests {
             assert_abs_diff_eq!(*res, answer[i], epsilon=1e-5);
         }
     }
+}
+
+pub enum RollFn {
+    Median,
+    Mean,
 }
 
 fn median(vec: &mut Vec<f64>) -> Result<f64, Box<dyn Error>> {
@@ -577,7 +638,6 @@ impl BEDGraphData {
 
         let score_mad = self.mad()?;
         let score_median = self.median()?;
-        let scores = self.fetch_scores()?;
         let records: Vec::<BEDGraphRecord> = self.iter()
             .map(|x| {
                 BEDGraphRecord {
@@ -591,11 +651,12 @@ impl BEDGraphData {
         Ok(BEDGraphData{data: records})
     }
 
-    /// calculates a rolling mean for each contig in the bedgraph file
-    pub fn roll_mean(
+    /// calculats rolling function for each contig in the bedgraph file
+    pub fn roll_fn(
             &self,
             window_size: usize,
             circular: bool,
+            func: RollFn,
     ) -> Result<BEDGraphData, Box<dyn Error>> {
         if window_size % 2 == 0 {
             eprintln!("Window size should be an odd number for rolling mean, but you entered {}. Exiting now.", window_size);
@@ -615,25 +676,36 @@ impl BEDGraphData {
                 circular,
             )?;
 
-            let mut mean_prev_opt: Option<(f64, f64)> = None;
             let mut results: Vec<f64> = Vec::with_capacity(contig_bg.len());
+            if let RollFn::Median = func {
+                for window in padded_scores.windows(window_size) {
+                    let mut win: Vec<f64> = window.to_vec();
+                    win.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let median = win[window_size / 2];
+                    results.push(median);
+                }
+            } else if let RollFn::Mean = func {
+                let mut mean_prev_opt: Option<(f64, f64)> = None;
 
-            for window in padded_scores.windows(window_size) {
-                let mean = match mean_prev_opt {
-                    None => {
-                        window.iter().sum::<f64>() / win_size_f
-                    },
-                    Some((prev_mean, prev)) => {
-                        let next = window.last().unwrap();
-                        let mean = prev_mean + (*next - prev) / win_size_f;
-                        mean
-                    }
-                };
-                let prev = window.first().unwrap();
-                results.push(mean);
-                mean_prev_opt = Some((mean, *prev))
+                for window in padded_scores.windows(window_size) {
+                    let mean = match mean_prev_opt {
+                        None => {
+                            window.iter().sum::<f64>() / win_size_f
+                        },
+                        Some((prev_mean, prev)) => {
+                            let next = window.last().unwrap();
+                            let mean = prev_mean + (*next - prev) / win_size_f;
+                            mean
+                        }
+                    };
+                    let prev = window.first().unwrap();
+                    results.push(mean);
+                    mean_prev_opt = Some((mean, *prev))
+                }
+            } else {
+                println!("No valid RollFn enum present. Exiting now.");
+                process::exit(1);
             }
-
             for (i,result) in results.iter().enumerate() {
                 let record = BEDGraphRecord::new(
                     contig.to_string(),
