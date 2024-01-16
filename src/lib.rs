@@ -3,6 +3,7 @@ use std::io::stdin;
 use std::io::Write;
 use std::fmt;
 use std::io::BufReader;
+use std::io::BufWriter;
 use std::fs::File;
 use std::error::Error;
 use std::path;
@@ -498,11 +499,22 @@ impl BEDGraphData {
         Ok(BEDGraphData{ data: records })
     }
 
-    /// Writes the bedgraph file to stdout
+    /// Writes the bedgraph data to stdout
     pub fn print(&self) -> Result<(), Box<dyn Error>> {
         let mut stdout = stdout();
         for record in &self.data {
             write!(stdout, "{}", record)?;
+        }
+        Ok(())
+    }
+
+    /// Writes the bedgraph data to a bedgraph file
+    pub fn to_file(&self, fname: &path::PathBuf) -> Result<(), Box<dyn Error>> {
+        let outf = File::create(fname)?;
+        let mut writer = BufWriter::new(outf);
+
+        for record in &self.data {
+            writeln!(writer, "{}", record)?;
         }
         Ok(())
     }
