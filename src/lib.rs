@@ -524,6 +524,54 @@ impl BEDGraphData {
         Ok(BEDGraphData{ data: records })
     }
 
+    /// Parse bedgraph records from stdin, printing contiguous regions as bed format
+    pub fn print_contiguous_regions_from_stdin() -> Result<(), Box<dyn Error>> {
+        // read from stdin
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(b'\t')
+            .has_headers(false)
+            .from_reader(stdin());
+        // establish connection to stdout
+        let mut stdout = stdout();
+
+        let mut region = BEDRecord::new("".into(), 0, 0);
+        let mut first_row = true;
+
+        for result in rdr.deserialize() {
+            let record: BEDGraphRecord = result.unwrap_or_else(|err| {
+                eprintln!("Problem with your bedgraph records. Is the stdin a properly-formed bedgraph file?: {}", err);
+                process::exit(1);
+            });
+            if region.seqname != record.seqname {
+                // if we've hit a new seqname and this is not the first row, then print bed record
+                // prior to setting new region
+                if !first_row {
+                    write!(stdout, "{}", region)?;
+                }
+                region.set(&record.seqname, &record.start, &record.end);
+            } else {
+                // if we're in the same seqname, check whether region's end and record's start are
+                // equal. If they are equal, region is contiguous with record, so set region end to
+                // record end
+                if region.end == record.start {
+                    region.set_end(&record.end);
+                // if they're not equal, these are not contiguous, so print the region and re-set
+                // region to have this record's attributes
+                } else {
+                    write!(stdout, "{}", region)?;
+                    region.set_start(&record.start);
+                    region.set_end(&record.end);
+                }
+            }
+            first_row = false;
+        }
+        // write the final region if it is different than beginning region
+        if !(region.seqname == "") {
+            write!(stdout, "{}", region)?;
+        }
+        Ok(())
+    }
+
     /// Read begraph file line-by-line, printing each contigous regions to stdout as they are
     /// identified
     pub fn print_contiguous_regions(fname: &path::PathBuf) -> Result<(), Box<dyn Error>> {
@@ -544,7 +592,6 @@ impl BEDGraphData {
 
         let mut region = BEDRecord::new("".into(), 0, 0);
         let mut first_row = true;
-
 
         for result in rdr.deserialize() {
             let record: BEDGraphRecord = result.unwrap_or_else(|err| {
