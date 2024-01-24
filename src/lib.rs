@@ -412,6 +412,45 @@ fn robust_z(x: f64, median: f64, mad: f64) -> f64 {
     0.6745 * (x - median) / mad
 }
 
+/// struct to define a single line of a bed file
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct BEDRecord {
+    seqname: String,
+    start: usize,
+    end: usize,
+}
+
+impl BEDRecord {
+    fn new(
+        seqname: String,
+        start: usize,
+        end: usize,
+    ) -> BEDRecord {
+        BEDRecord {
+            seqname,
+            start,
+            end,
+        }
+    }
+
+    fn set(&mut self, seqname: &str, start: &usize, end: &usize) {
+        self.set_seqname(seqname);
+        self.set_start(start);
+        self.set_end(end);
+    }
+
+    fn set_seqname(&mut self, seqname: &str) {
+        self.seqname = String::from(seqname);
+    }
+
+    fn set_start(&mut self, start: &usize) {
+        self.start = *start;
+    }
+
+    fn set_end(&mut self, end: &usize) {
+        self.end = *end;
+    }
+}
 
 /// struct to define a single line of a bedgraph file
 #[derive(Debug, Deserialize, PartialEq)]
@@ -442,11 +481,23 @@ impl BEDGraphRecord {
     }
 }
 
+/// Implement `Display` for `BEDRecord`.
+impl fmt::Display for BEDRecord {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}\t{}\t{}\n", self.seqname, self.start, self.end)
+    }
+}
+
 /// Implement `Display` for `BEDGraphRecord`.
 impl fmt::Display for BEDGraphRecord {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}\t{}\t{}\t{}\n", self.seqname, self.start, self.end, self.score)
     }
+}
+
+/// holds a bed file
+pub struct BEDData {
+    data: Vec<BEDRecord>,
 }
 
 /// holds a bedgraph file
@@ -471,6 +522,64 @@ impl BEDGraphData {
             records.push(record);
         }
         Ok(BEDGraphData{ data: records })
+    }
+
+    /// Read begraph file line-by-line, printing each contigous regions to stdout as they are
+    /// identified
+    pub fn print_contiguous_regions(fname: &path::PathBuf) -> Result<(), Box<dyn Error>> {
+
+        let file = File::open(fname).unwrap_or_else(|err| {
+            eprintln!("Problem reading bedgraph file {:?}: {}", fname, err);
+            process::exit(1);
+        });
+        // open buffered reader to bedgraph file
+        let buf_reader = BufReader::new(file);
+        // establish connection to stdout
+        let mut stdout = stdout();
+
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(b'\t')
+            .has_headers(false)
+            .from_reader(buf_reader);
+
+        let mut region = BEDRecord::new("".into(), 0, 0);
+        let mut first_row = true;
+
+
+        for result in rdr.deserialize() {
+            let record: BEDGraphRecord = result.unwrap_or_else(|err| {
+                eprintln!("Problem with your bedgraph records. Is {:?} a properly-formed bedgraph file?: {}", fname, err);
+                process::exit(1);
+            });
+            if region.seqname != record.seqname {
+                // if we've hit a new seqname and this is not the first row, then print bed record
+                // prior to setting new region
+                if !first_row {
+                    write!(stdout, "{}", region)?;
+                }
+                region.set(&record.seqname, &record.start, &record.end);
+            } else {
+                // if we're in the same seqname, check whether region's end and record's start are
+                // equal. If they are equal, region is contiguous with record, so set region end to
+                // record end
+                if region.end == record.start {
+                    region.set_end(&record.end);
+                // if they're not equal, these are not contiguous, so print the region and re-set
+                // region to have this record's attributes
+                } else {
+                    write!(stdout, "{}", region)?;
+                    region.set_start(&record.start);
+                    region.set_end(&record.end);
+                }
+            }
+            first_row = false;
+        }
+        // write the final region if it is different than beginning region
+        if !(region.seqname == "") {
+            write!(stdout, "{}", region)?;
+        }
+
+        Ok(())
     }
 
     /// Read a bedgraph file
