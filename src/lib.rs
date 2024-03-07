@@ -506,6 +506,11 @@ pub struct BEDGraphData {
 }
 
 impl BEDGraphData {
+
+    pub fn from_record_vec(rec_vec: Vec<BEDGraphRecord>) -> BEDGraphData {
+        BEDGraphData{ data: rec_vec }
+    }
+
     /// Parse bedgraph records from stdin
     pub fn from_stdin() -> Result<BEDGraphData, Box<dyn Error>> {
         let mut rdr = csv::ReaderBuilder::new()
