@@ -18,9 +18,56 @@ mod tests {
     /////////////////////////////////////////////////////////
     // update to work anywhere, setting src depending on where we are?
     /////////////////////////////////////////////////////////
-    const TESTDIR: &str = "/home/jeremy/src/bio-anno-rs/test_files";
+    const TESTDIR: &str = "/corexfs/schroedj/src/bio-anno-rs/test_files";
     use super::*;
     use approx::assert_abs_diff_eq;
+
+    #[test]
+    fn test_unify_widths() {
+        let bgd = BEDGraphData::from_file(
+            &path::Path::new(TESTDIR).join("test_unify_width.bedgraph"),
+        ).unwrap();
+        let true_scores: Vec<f64> = vec![0.0, 0.0, 20.0, 20.0, 20.0, 20.0, 40.0, 60.0, 60.0];
+        let true_starts: Vec<usize> = vec![0, 5, 10, 15, 20, 25, 30, 35, 40];
+        let true_ends: Vec<usize> = vec![5, 10, 15, 20, 25, 30, 35, 40, 42];
+        let width = 5;
+
+        let unified = bgd.unify_bins(width).unwrap();
+
+        assert_eq!(unified.len(), 9);
+        for (i,res) in unified.iter().enumerate() {
+            assert_abs_diff_eq!(res.score, true_scores[i], epsilon=1e-12);
+            assert_eq!(res.start, true_starts[i]);
+            assert_eq!(res.end, true_ends[i]);
+        }
+    } 
+
+    #[test]
+    fn test_unify_widths_error() {
+        let bgr = BEDGraphRecord{
+            seqname: String::from("foo"),
+            start: 10,
+            end: 44,
+            score: 0.0,
+        };
+        let width = 5;
+        let final_end = 100;
+        
+        match bgr.split_evenly(width, final_end) {
+            Ok(_) => panic!("The test unexpectedly succeeded."),
+            Err(e) => {
+                // This is the expected path for an undivisible record width
+                // Check that the error message contains the expected text
+                let expected_message = format!(
+                    "BEDGraphRecord width is not evenly divisible: start = {}, end = {}, desired width = {}. Exiting without printing results.",
+                    bgr.start,
+                    bgr.end,
+                    width,
+                );
+                assert_eq!(expected_message, e.to_string());
+            }
+        }
+    } 
 
     #[test]
     fn test_bg_filter() {
@@ -375,6 +422,28 @@ mod tests {
     }
 }
 
+#[derive(Debug, Clone)]
+struct BEDGraphRecordNotDivisible {
+    start: usize,
+    end: usize,
+    width: usize,
+}
+
+// Implement the Display trait for BEDGraphRecordNotDivisible
+impl fmt::Display for BEDGraphRecordNotDivisible {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "BEDGraphRecord width is not evenly divisible: start = {}, end = {}, desired width = {}. Exiting without printing results.",
+            self.start, self.end, self.width
+        )
+    }
+}
+
+// Implement the Error trait for BEDGraphRecordNotDivisible. Since we don't have any additional
+// data to provide, we can just defer to the Display implementation.
+impl Error for BEDGraphRecordNotDivisible {}
+
 pub enum RollFn {
     Median,
     Mean,
@@ -478,6 +547,49 @@ impl BEDGraphRecord {
 
     fn set_score(&mut self, new_score: f64) {
         self.score = new_score;
+    }
+
+    // This method attempts to split the BEDGraphRecord into several with equal width 'w'.
+    fn split_evenly(
+            &self,
+            w: usize,
+            final_end: usize,
+    ) -> Result<Vec<BEDGraphRecord>, BEDGraphRecordNotDivisible> {
+        let width = self.end - self.start;
+        let is_final_record = self.end == final_end;
+
+        // Check if the width is evenly divisible by w.
+        if width % w == 0 || is_final_record {
+            // Calculate the number of records that will be produced.
+            let num_full_width_records = width / w;
+            // Create the new records.
+            let mut records = Vec::with_capacity(num_full_width_records+1);
+            for i in 0..num_full_width_records {
+                records.push(BEDGraphRecord {
+                    seqname: self.seqname.to_string(),
+                    start: self.start + i * w,
+                    end: self.start + (i + 1) * w,
+                    score: self.score,
+                });
+            }
+            // Handle the last record if it's the final one and not full-width
+            if is_final_record && width % w != 0 {
+                records.push(BEDGraphRecord {
+                    seqname: self.seqname.to_string(),
+                    start: self.start + num_full_width_records * w,
+                    end: self.end,
+                    score: self.score,
+                });
+            }
+            Ok(records)
+        } else {
+            // Return an error if the width is not divisible by 'w'.
+            Err(BEDGraphRecordNotDivisible{
+                start: self.start,
+                end: self.end,
+                width: w,
+            })
+        }
     }
 }
 
@@ -889,6 +1001,30 @@ impl BEDGraphData {
                 records.push( record );
             }
         }
+        Ok(BEDGraphData{data: records})
+    }
+
+    pub fn unify_bins(
+            &self,
+            width: usize,
+    ) -> Result<BEDGraphData, Box<dyn Error>> {
+
+        let contigs = self.get_contigs();
+        let mut records: Vec::<BEDGraphRecord> = Vec::with_capacity(self.len());
+
+        for contig in contigs {
+            let contig_bg = self.filter(
+                &contig,
+                &0,
+                &usize::MAX,
+            )?;
+            let final_end = self.get_max_end();
+            for orig_record in contig_bg.iter() {
+                let mut new_records = orig_record.split_evenly(width, final_end)?;
+                records.append(&mut new_records)
+            }
+        }
+
         Ok(BEDGraphData{data: records})
     }
 }
