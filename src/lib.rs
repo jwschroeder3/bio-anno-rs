@@ -1018,7 +1018,7 @@ impl BEDGraphData {
                 &0,
                 &usize::MAX,
             )?;
-            let final_end = self.get_max_end();
+            let final_end = contig_bg.get_max_end();
             for orig_record in contig_bg.iter() {
                 let mut new_records = orig_record.split_evenly(width, final_end)?;
                 records.append(&mut new_records)
