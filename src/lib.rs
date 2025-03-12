@@ -531,7 +531,7 @@ pub struct BEDGraphRecord {
 }
 
 impl BEDGraphRecord {
-    fn new(
+    pub fn new(
         seqname: String,
         start: usize,
         end: usize,
