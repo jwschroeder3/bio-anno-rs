@@ -24,5 +24,5 @@ To use this crate, I *think* you can add the following to your
 bio_anno = { git = "https://github.com/jwschroeder3/bio-anno-rs", branch = "main" }
 ```
 
-And then include `use bio_anno;` in your source code.
+And then include `use bio-anno-rs;` in your source code.
 
